@@ -5,6 +5,10 @@ on:
     - cron: '15 20 * * 1-5' # Runs at 4:15 PM Eastern (20:15 UTC) Monday-Friday
   workflow_dispatch: # Allows you to click a button to test it manually
 
+# This forces the older actions to use the new Node 24 backend, silencing the warning
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   run-script:
     runs-on: ubuntu-latest
