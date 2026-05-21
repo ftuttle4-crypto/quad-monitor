@@ -2,7 +2,7 @@ name: Daily Quad Monitor
 
 on:
   schedule:
-    - cron: '15 20 * * 1-5' # Runs at 4:15 PM Eastern (20:15 UTC) Monday-Friday
+    - cron: '45 19 * * 1-5' # Runs at 4:15 PM Eastern (20:15 UTC) Monday-Friday
   workflow_dispatch: # Allows you to click a button to test it manually
 
 # This forces the older actions to use the new Node 24 backend, silencing the warning
