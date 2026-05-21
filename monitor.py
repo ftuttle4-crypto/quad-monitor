@@ -1,63 +1,101 @@
+import os
+import smtplib
+from email.message import EmailMessage
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from statsmodels.tsa.ar_model import AutoReg
-import smtplib
-from email.mime.text import MIMEText
-import os
-from datetime import datetime
 
-# Authenticate using the hidden GitHub Secrets
-SENDER_EMAIL = os.environ.get("SENDER_EMAIL")
-SENDER_PASSWORD = os.environ.get("SENDER_PASSWORD")
-RECEIVER_EMAIL = os.environ.get("RECEIVER_EMAIL")
+def calculate_quad_risk():
+    # 1. Fetch QQQ Daily Data (Need at least 250 days for the longest SMA)
+    # Using 2 years to ensure we have enough trading days
+    ticker = yf.Ticker("QQQ")
+    df = ticker.history(period="2y", interval="1d", auto_adjust=True)
+    
+    if df.empty:
+        raise ValueError("Failed to fetch data from yfinance.")
+        
+    close_prices = df['Close']
+    returns = close_prices.pct_change().dropna()
+    
+    # 2. Extract Latest Price
+    current_price = close_prices.iloc[-1]
+    
+    # 3. Calculate the 4 Indicators
+    # Gate 1 & 2: Moving Averages (250 and 100)
+    sma_250 = close_prices.rolling(window=250).mean().iloc[-1]
+    sma_100 = close_prices.rolling(window=100).mean().iloc[-1]
+    
+    # Gate 3: 21-Day Realized Volatility (Annualized)
+    # np.sqrt(252) converts daily volatility to annualized volatility
+    vol_21 = returns.rolling(window=21).std().iloc[-1] * np.sqrt(252)
+    
+    # Gate 4: 30-Day AR(1) Momentum Coefficient
+    # Calculates the correlation between today's return and yesterday's return over 30 days
+    recent_30_returns = returns.iloc[-30:]
+    ar1_coeff = recent_30_returns.autocorr(lag=1)
+    
+    # 4. Evaluate Gate Conditions (Default 0.0% Buffer)
+    trend_long = current_price > sma_250
+    trend_medium = current_price > sma_100
+    vol_safe = vol_21 < 0.40  # Under 40% annualized volatility
+    momentum_positive = ar1_coeff > 0.0
+    
+    # 5. Calculate Distances for Human Buffer (NEW)
+    pct_from_250 = ((current_price - sma_250) / sma_250) * 100
+    pct_from_100 = ((current_price - sma_100) / sma_100) * 100
+    
+    # 6. Apply "K" Rule (Vote of 2 out of 4)
+    green_count = sum([trend_long, trend_medium, vol_safe, momentum_positive])
+    system_status = "RISK-ON (Maintain QLD)" if green_count >= 2 else "RISK-OFF (Move to Cash/ZROZ)"
+    
+    # 7. Format the Email
+    email_body = f"""
+Quad Risk K2 Daily Monitor
+-------------------------
+System Status: {system_status}
+Green Indicators: {green_count}/4
 
-# 1. Fetch QQQ market data
-data = yf.download("QQQ", period="1y")
-close = data['Close'].squeeze()
+Current QQQ Price: ${current_price:.2f}
 
-# 2. Calculate the 4 Indicators
-current_price = close.iloc[-1]
-sma_100 = close.rolling(window=100).mean().iloc[-1]
-sma_250 = close.rolling(window=250).mean().iloc[-1]
+1. 250-Day SMA: ${sma_250:.2f} (Dist: {pct_from_250:+.2f}%) | {'GREEN' if trend_long else 'RED'}
+2. 100-Day SMA: ${sma_100:.2f} (Dist: {pct_from_100:+.2f}%) | {'GREEN' if trend_medium else 'RED'}
+3. 21-Day Volatility: {vol_21 * 100:.2f}% (Limit: <40%) | {'GREEN' if vol_safe else 'RED'}
+4. 30-Day AR(1) Momentum: {ar1_coeff:.4f} (Limit: >0) | {'GREEN' if momentum_positive else 'RED'}
 
-# Annualized 21-day Realized Volatility
-daily_returns = close.pct_change().dropna()
-vol_21d = daily_returns.tail(21).std() * np.sqrt(252) * 100
-
-# AR(1) Momentum over the last 30 days
-prices_30d = close.tail(30).values
-model = AutoReg(prices_30d, lags=1).fit()
-ar1_coeff = model.params[1]
-
-# 3. Evaluate the Status
-cond1 = current_price > sma_250
-cond2 = current_price > sma_100
-cond3 = vol_21d < 40
-cond4 = ar1_coeff > 0
-
-green_count = sum([cond1, cond2, cond3, cond4])
-status = "RISK-ON (Maintain 70% QLD / 30% SWVXX)" if green_count >= 2 else "RISK-OFF (Rotate 100% SWVXX)"
-
-# 4. Format the Email Output
-date_str = datetime.now().strftime("%Y-%m-%d")
-body = f"""
-Quad Risk K2 Daily Monitor - {date_str}
-
-Status: {green_count}/4 Green -> {status}
-
-1. Price vs 250 SMA: {current_price:.2f} / {sma_250:.2f} -> {'GREEN' if cond1 else 'RED'}
-2. Price vs 100 SMA: {current_price:.2f} / {sma_100:.2f} -> {'GREEN' if cond2 else 'RED'}
-3. 21D Volatility: {vol_21d:.2f}% (Limit: <40%) -> {'GREEN' if cond3 else 'RED'}
-4. AR(1) 30D Coeff: {ar1_coeff:.4f} (Limit: >0) -> {'GREEN' if cond4 else 'RED'}
+---
+NOTE: If executing on the final trading day of the month, verify the SMA Distance percentages. If the distance is < 1.0%, ensure the trend is definitive before placing a Market-On-Close (MOC) order to avoid whipsaw.
 """
+    return email_body
 
-# 5. Send the Email
-msg = MIMEText(body)
-msg['Subject'] = f"Quad Status: {green_count}/4 Green"
-msg['From'] = SENDER_EMAIL
-msg['To'] = RECEIVER_EMAIL
+def send_email(body):
+    sender_email = os.environ.get("SENDER_EMAIL")
+    sender_password = os.environ.get("SENDER_PASSWORD")
+    recipient_email = os.environ.get("RECIPIENT_EMAIL")
+    
+    if not all([sender_email, sender_password, recipient_email]):
+        print("Email credentials missing in environment variables.")
+        return
 
-with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-    server.login(SENDER_EMAIL, SENDER_PASSWORD)
-    server.send_message(msg)
+    msg = EmailMessage()
+    msg.set_content(body)
+    msg['Subject'] = "Quad Risk K2 Daily Update"
+    msg['From'] = sender_email
+    msg['To'] = recipient_email
+
+    try:
+        # Assuming Gmail SMTP setup - adjust if using a different provider
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(sender_email, sender_password)
+            smtp.send_message(msg)
+        print("Email sent successfully.")
+    except Exception as e:
+        print(f"Error sending email: {e}")
+
+if __name__ == "__main__":
+    print("Running Quad Risk K2 calculations...")
+    try:
+        report = calculate_quad_risk()
+        print(report)
+        send_email(report)
+    except Exception as e:
+        print(f"Script failed: {e}")
