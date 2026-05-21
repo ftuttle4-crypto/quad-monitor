@@ -34,6 +34,6 @@ jobs:
         # Maps your secure GitHub Secrets into the server environment
         SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
         SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
-        RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+        RECIPIENT_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
       run: |
         python monitor.py
