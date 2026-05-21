@@ -47,9 +47,11 @@ def sma_gate(prices: pd.Series, period: int, threshold: float) -> pd.Series:
 # --- Execution Logic ---
 
 def verify_execution_time():
+    """Acts as a bouncer to handle Daylight Saving Time offsets."""
     ny_time = datetime.now(ZoneInfo("America/New_York"))
     if ny_time.hour != 15:
         print(f"Stand down: It is currently {ny_time.strftime('%I:%M %p')} in NY.")
+        print("Waiting for the 3:45 PM execution window. Exiting gracefully.")
         sys.exit(0)
 
 def calculate_quad_risk():
@@ -64,10 +66,11 @@ def calculate_quad_risk():
     gate_250 = sma_gate(close_prices, period=250, threshold=0.05).iloc[-1]
     gate_100 = sma_gate(close_prices, period=100, threshold=0.05).iloc[-1]
     
-    # Calculate raw SMA for email display
+    # Calculate raw SMA for email display and tripwires
     sma_250_val = close_prices.rolling(window=250).mean().iloc[-1]
     sma_100_val = close_prices.rolling(window=100).mean().iloc[-1]
     pct_from_250 = ((current_price - sma_250_val) / sma_250_val) * 100
+    pct_from_100 = ((current_price - sma_100_val) / sma_100_val) * 100
     
     # 2. Volatility and AR(1)
     vol_21 = returns.rolling(window=21).std().iloc[-1] * np.sqrt(252)
@@ -79,9 +82,9 @@ def calculate_quad_risk():
     # 3. K2 Voting Logic
     green_count = int(sum([gate_250, gate_100, gate_vol, gate_mom]))
     
-    # Maintaining your custom allocation format
     system_status = "RISK-ON (Maintain 70% QLD / 30% SWVXX)" if green_count >= 2 else "RISK-OFF (Rotate 100% SWVXX)"
     
+    # 4. The Upgraded Email Body
     email_body = f"""
 Quad Risk K2 Daily Monitor
 -------------------------
@@ -90,8 +93,12 @@ Green Indicators: {green_count}/4
 
 Current QQQ Price: ${current_price:.2f}
 
-1. 250-Day SMA Gate (5% Band): {'GREEN' if gate_250 == 1.0 else 'RED'} | (Raw SMA: ${sma_250_val:.2f} / Dist: {pct_from_250:+.2f}%)
-2. 100-Day SMA Gate (5% Band): {'GREEN' if gate_100 == 1.0 else 'RED'}
+1. 250-Day SMA Gate: {'GREEN' if gate_250 == 1.0 else 'RED'} | (Dist from Center: {pct_from_250:+.2f}%)
+   ↳ Tripwires -> Risk-Off below: ${sma_250_val * 0.95:.2f} | Risk-On above: ${sma_250_val * 1.05:.2f}
+
+2. 100-Day SMA Gate: {'GREEN' if gate_100 == 1.0 else 'RED'} | (Dist from Center: {pct_from_100:+.2f}%)
+   ↳ Tripwires -> Risk-Off below: ${sma_100_val * 0.95:.2f} | Risk-On above: ${sma_100_val * 1.05:.2f}
+
 3. 21-Day Volatility: {vol_21 * 100:.2f}% (Limit: <40%) | {'GREEN' if gate_vol == 1.0 else 'RED'}
 4. 30-Day AR(1) Momentum: {ar1_coeff:.4f} (Limit: >0) | {'GREEN' if gate_mom == 1.0 else 'RED'}
 """
@@ -100,7 +107,7 @@ Current QQQ Price: ${current_price:.2f}
 def send_email(body):
     sender_email = os.environ.get("SENDER_EMAIL")
     sender_password = os.environ.get("SENDER_PASSWORD")
-    recipient_email = os.environ.get("RECEIVER_EMAIL")
+    recipient_email = os.environ.get("RECEIVER_EMAIL") # Matches your daily_run.yml exactly
     
     if not all([sender_email, sender_password, recipient_email]):
         print("Email credentials missing.")
@@ -115,9 +122,12 @@ def send_email(body):
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login(sender_email, sender_password)
         smtp.send_message(msg)
+        print("Email sent successfully.")
 
 if __name__ == "__main__":
-    #verify_execution_time()
+    # --- TEMPORARILY COMMENTED OUT FOR LIVE TESTING TONIGHT ---
+    # verify_execution_time()
+    
     try:
         report = calculate_quad_risk()
         send_email(report)
