@@ -100,7 +100,7 @@ Current QQQ Price: ${current_price:.2f}
 def send_email(body):
     sender_email = os.environ.get("SENDER_EMAIL")
     sender_password = os.environ.get("SENDER_PASSWORD")
-    recipient_email = os.environ.get("RECIPIENT_EMAIL")
+    recipient_email = os.environ.get("RECEIVER_EMAIL")
     
     if not all([sender_email, sender_password, recipient_email]):
         print("Email credentials missing.")
