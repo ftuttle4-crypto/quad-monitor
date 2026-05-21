@@ -117,7 +117,7 @@ def send_email(body):
         smtp.send_message(msg)
 
 if __name__ == "__main__":
-    verify_execution_time()
+    #verify_execution_time()
     try:
         report = calculate_quad_risk()
         send_email(report)
