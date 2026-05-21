@@ -106,7 +106,7 @@ def send_email(body):
 
 if __name__ == "__main__":
     # 1. Check if it is the correct time in New York
-    # verify_execution_time()
+    verify_execution_time()
     
     # 2. If we pass the bouncer, run the heavy math
     print("Correct execution window confirmed. Running Quad Risk K2 calculations...")
