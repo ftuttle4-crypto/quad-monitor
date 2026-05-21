@@ -1,13 +1,26 @@
 import os
+import sys
 import smtplib
 from email.message import EmailMessage
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import yfinance as yf
 import pandas as pd
 import numpy as np
 
+def verify_execution_time():
+    """Acts as a bouncer to handle Daylight Saving Time offsets."""
+    # Get the exact current time in New York
+    ny_time = datetime.now(ZoneInfo("America/New_York"))
+    
+    # We only want the script to run if it is exactly the 3 PM hour (15:00) in Eastern Time.
+    if ny_time.hour != 15:
+        print(f"Stand down: It is currently {ny_time.strftime('%I:%M %p')} in NY.")
+        print("Waiting for the 3:45 PM execution window. Exiting gracefully.")
+        sys.exit(0)  # Exits the script cleanly without throwing a GitHub error
+
 def calculate_quad_risk():
-    # 1. Fetch QQQ Daily Data (Need at least 250 days for the longest SMA)
-    # Using 2 years to ensure we have enough trading days
+    # 1. Fetch QQQ Daily Data (2 years to ensure enough data for 250 SMA)
     ticker = yf.Ticker("QQQ")
     df = ticker.history(period="2y", interval="1d", auto_adjust=True)
     
@@ -26,11 +39,9 @@ def calculate_quad_risk():
     sma_100 = close_prices.rolling(window=100).mean().iloc[-1]
     
     # Gate 3: 21-Day Realized Volatility (Annualized)
-    # np.sqrt(252) converts daily volatility to annualized volatility
     vol_21 = returns.rolling(window=21).std().iloc[-1] * np.sqrt(252)
     
     # Gate 4: 30-Day AR(1) Momentum Coefficient
-    # Calculates the correlation between today's return and yesterday's return over 30 days
     recent_30_returns = returns.iloc[-30:]
     ar1_coeff = recent_30_returns.autocorr(lag=1)
     
@@ -40,15 +51,17 @@ def calculate_quad_risk():
     vol_safe = vol_21 < 0.40  # Under 40% annualized volatility
     momentum_positive = ar1_coeff > 0.0
     
-    # 5. Calculate Distances for Human Buffer (NEW)
+    # 5. Calculate Distances for Human Buffer
     pct_from_250 = ((current_price - sma_250) / sma_250) * 100
     pct_from_100 = ((current_price - sma_100) / sma_100) * 100
     
     # 6. Apply "K" Rule (Vote of 2 out of 4)
     green_count = sum([trend_long, trend_medium, vol_safe, momentum_positive])
-    system_status = "RISK-ON (Maintain QLD)" if green_count >= 2 else "RISK-OFF (Move to Cash/ZROZ)"
     
-    # 7. Format the Email
+    # 7. Format Custom Portfolio Allocations
+    system_status = "RISK-ON (Maintain 70% QLD / 30% SWVXX)" if green_count >= 2 else "RISK-OFF (Rotate 100% SWVXX)"
+    
+    # 8. Format the Email
     email_body = f"""
 Quad Risk K2 Daily Monitor
 -------------------------
@@ -92,7 +105,11 @@ def send_email(body):
         print(f"Error sending email: {e}")
 
 if __name__ == "__main__":
-    print("Running Quad Risk K2 calculations...")
+    # 1. Check if it is the correct time in New York
+    verify_execution_time()
+    
+    # 2. If we pass the bouncer, run the heavy math
+    print("Correct execution window confirmed. Running Quad Risk K2 calculations...")
     try:
         report = calculate_quad_risk()
         print(report)
