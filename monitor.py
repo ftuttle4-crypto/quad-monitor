@@ -84,23 +84,32 @@ def calculate_quad_risk():
     
     system_status = "RISK-ON (Maintain 70% QLD / 30% SWVXX)" if green_count >= 2 else "RISK-OFF (Rotate 100% SWVXX)"
     
-    # 4. The Upgraded Email Body
+# 4. The Upgraded Email Body
     email_body = f"""
 Quad Risk K2 Daily Monitor
 -------------------------
-System Status: {system_status}
-Green Indicators: {green_count}/4
+🎯 SYSTEM SIGNAL: {system_status}
+🟢 Green Indicators: {green_count}/4
 
 Current QQQ Price: ${current_price:.2f}
 
-1. 250-Day SMA Gate: {'GREEN' if gate_250 == 1.0 else 'RED'} | (Dist from Center: {pct_from_250:+.2f}%)
-   ↳ Tripwires -> Risk-Off below: ${sma_250_val * 0.95:.2f} | Risk-On above: ${sma_250_val * 1.05:.2f}
+--- INDICATOR BREAKDOWN ---
+1. 250-Day SMA Gate: {'GREEN' if gate_250 == 1.0 else 'RED'}
+   ↳ Raw SMA Line: ${sma_250_val:.2f} (Dist: {pct_from_250:+.2f}%)
+   ↳ Tripwires: Drops to RED below ${sma_250_val * 0.95:.2f} | Flips to GREEN above ${sma_250_val * 1.05:.2f}
 
-2. 100-Day SMA Gate: {'GREEN' if gate_100 == 1.0 else 'RED'} | (Dist from Center: {pct_from_100:+.2f}%)
-   ↳ Tripwires -> Risk-Off below: ${sma_100_val * 0.95:.2f} | Risk-On above: ${sma_100_val * 1.05:.2f}
+2. 100-Day SMA Gate: {'GREEN' if gate_100 == 1.0 else 'RED'}
+   ↳ Raw SMA Line: ${sma_100_val:.2f} (Dist: {pct_from_100:+.2f}%)
+   ↳ Tripwires: Drops to RED below ${sma_100_val * 0.95:.2f} | Flips to GREEN above ${sma_100_val * 1.05:.2f}
 
 3. 21-Day Volatility: {vol_21 * 100:.2f}% (Limit: <40%) | {'GREEN' if gate_vol == 1.0 else 'RED'}
 4. 30-Day AR(1) Momentum: {ar1_coeff:.4f} (Limit: >0) | {'GREEN' if gate_mom == 1.0 else 'RED'}
+
+--- WHAT YOU NEED TO DO ---
+Because this system uses 5% memory bands, the script automatically handles the "HOLD" zones for you. Check your current brokerage account:
+
+• If your account matches the 🎯 SYSTEM SIGNAL -> DO NOTHING.
+• If your account does NOT match the signal -> EXECUTE TRADE near the close to align with the new signal.
 """
     return email_body
 
