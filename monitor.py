@@ -8,60 +8,80 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
-def verify_execution_time():
-    """Acts as a bouncer to handle Daylight Saving Time offsets."""
-    # Get the exact current time in New York
-    ny_time = datetime.now(ZoneInfo("America/New_York"))
+# --- The Author's Exact Gate Functions ---
+
+def _band_gate(prices: pd.Series, ref: pd.Series, threshold: float) -> pd.Series:
+    if threshold <= 0:
+        gate = (prices > ref).astype(float)
+        gate[ref.isna()] = np.nan
+        return gate
+
+    upper = ref * (1.0 + threshold)
+    lower = ref * (1.0 - threshold)
+    out = np.full(len(prices), np.nan)
+    state = np.nan
+    p_arr = prices.to_numpy()
+    u_arr = upper.to_numpy()
+    l_arr = lower.to_numpy()
+    r_arr = ref.to_numpy()
     
-    # We only want the script to run if it is exactly the 3 PM hour (15:00) in Eastern Time.
+    for i in range(len(prices)):
+        if np.isnan(r_arr[i]) or np.isnan(p_arr[i]):
+            out[i] = np.nan
+            state = np.nan
+            continue
+        if np.isnan(state):
+            state = 1.0 if p_arr[i] > r_arr[i] else 0.0
+        if p_arr[i] > u_arr[i]:
+            state = 1.0
+        elif p_arr[i] < l_arr[i]:
+            state = 0.0
+        out[i] = state
+    return pd.Series(out, index=prices.index)
+
+def sma_gate(prices: pd.Series, period: int, threshold: float) -> pd.Series:
+    sma = prices.rolling(window=period, min_periods=period).mean()
+    return _band_gate(prices, sma, threshold)
+
+
+# --- Execution Logic ---
+
+def verify_execution_time():
+    ny_time = datetime.now(ZoneInfo("America/New_York"))
     if ny_time.hour != 15:
         print(f"Stand down: It is currently {ny_time.strftime('%I:%M %p')} in NY.")
-        print("Waiting for the 3:45 PM execution window. Exiting gracefully.")
-        sys.exit(0)  # Exits the script cleanly without throwing a GitHub error
+        sys.exit(0)
 
 def calculate_quad_risk():
-    # 1. Fetch QQQ Daily Data (2 years to ensure enough data for 250 SMA)
     ticker = yf.Ticker("QQQ")
     df = ticker.history(period="2y", interval="1d", auto_adjust=True)
     
-    if df.empty:
-        raise ValueError("Failed to fetch data from yfinance.")
-        
     close_prices = df['Close']
     returns = close_prices.pct_change().dropna()
-    
-    # 2. Extract Latest Price
     current_price = close_prices.iloc[-1]
     
-    # 3. Calculate the 4 Indicators
-    # Gate 1 & 2: Moving Averages (250 and 100)
-    sma_250 = close_prices.rolling(window=250).mean().iloc[-1]
-    sma_100 = close_prices.rolling(window=100).mean().iloc[-1]
+    # 1. Moving Averages with 5% Hysteresis Band (0.05)
+    gate_250 = sma_gate(close_prices, period=250, threshold=0.05).iloc[-1]
+    gate_100 = sma_gate(close_prices, period=100, threshold=0.05).iloc[-1]
     
-    # Gate 3: 21-Day Realized Volatility (Annualized)
+    # Calculate raw SMA for email display
+    sma_250_val = close_prices.rolling(window=250).mean().iloc[-1]
+    sma_100_val = close_prices.rolling(window=100).mean().iloc[-1]
+    pct_from_250 = ((current_price - sma_250_val) / sma_250_val) * 100
+    
+    # 2. Volatility and AR(1)
     vol_21 = returns.rolling(window=21).std().iloc[-1] * np.sqrt(252)
+    ar1_coeff = returns.iloc[-30:].autocorr(lag=1)
     
-    # Gate 4: 30-Day AR(1) Momentum Coefficient
-    recent_30_returns = returns.iloc[-30:]
-    ar1_coeff = recent_30_returns.autocorr(lag=1)
+    gate_vol = 1.0 if vol_21 < 0.40 else 0.0
+    gate_mom = 1.0 if ar1_coeff > 0.0 else 0.0
     
-    # 4. Evaluate Gate Conditions (Default 0.0% Buffer)
-    trend_long = current_price > sma_250
-    trend_medium = current_price > sma_100
-    vol_safe = vol_21 < 0.40  # Under 40% annualized volatility
-    momentum_positive = ar1_coeff > 0.0
+    # 3. K2 Voting Logic
+    green_count = int(sum([gate_250, gate_100, gate_vol, gate_mom]))
     
-    # 5. Calculate Distances for Human Buffer
-    pct_from_250 = ((current_price - sma_250) / sma_250) * 100
-    pct_from_100 = ((current_price - sma_100) / sma_100) * 100
-    
-    # 6. Apply "K" Rule (Vote of 2 out of 4)
-    green_count = sum([trend_long, trend_medium, vol_safe, momentum_positive])
-    
-    # 7. Format Custom Portfolio Allocations
+    # Maintaining your custom allocation format
     system_status = "RISK-ON (Maintain 70% QLD / 30% SWVXX)" if green_count >= 2 else "RISK-OFF (Rotate 100% SWVXX)"
     
-    # 8. Format the Email
     email_body = f"""
 Quad Risk K2 Daily Monitor
 -------------------------
@@ -70,13 +90,10 @@ Green Indicators: {green_count}/4
 
 Current QQQ Price: ${current_price:.2f}
 
-1. 250-Day SMA: ${sma_250:.2f} (Dist: {pct_from_250:+.2f}%) | {'GREEN' if trend_long else 'RED'}
-2. 100-Day SMA: ${sma_100:.2f} (Dist: {pct_from_100:+.2f}%) | {'GREEN' if trend_medium else 'RED'}
-3. 21-Day Volatility: {vol_21 * 100:.2f}% (Limit: <40%) | {'GREEN' if vol_safe else 'RED'}
-4. 30-Day AR(1) Momentum: {ar1_coeff:.4f} (Limit: >0) | {'GREEN' if momentum_positive else 'RED'}
-
----
-NOTE: If executing on the final trading day of the month, verify the SMA Distance percentages. If the distance is < 1.0%, ensure the trend is definitive before placing a Market-On-Close (MOC) order to avoid whipsaw.
+1. 250-Day SMA Gate (5% Band): {'GREEN' if gate_250 == 1.0 else 'RED'} | (Raw SMA: ${sma_250_val:.2f} / Dist: {pct_from_250:+.2f}%)
+2. 100-Day SMA Gate (5% Band): {'GREEN' if gate_100 == 1.0 else 'RED'}
+3. 21-Day Volatility: {vol_21 * 100:.2f}% (Limit: <40%) | {'GREEN' if gate_vol == 1.0 else 'RED'}
+4. 30-Day AR(1) Momentum: {ar1_coeff:.4f} (Limit: >0) | {'GREEN' if gate_mom == 1.0 else 'RED'}
 """
     return email_body
 
@@ -86,7 +103,7 @@ def send_email(body):
     recipient_email = os.environ.get("RECIPIENT_EMAIL")
     
     if not all([sender_email, sender_password, recipient_email]):
-        print("Email credentials missing in environment variables.")
+        print("Email credentials missing.")
         return
 
     msg = EmailMessage()
@@ -95,24 +112,14 @@ def send_email(body):
     msg['From'] = sender_email
     msg['To'] = recipient_email
 
-    try:
-        # Assuming Gmail SMTP setup - adjust if using a different provider
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-            smtp.login(sender_email, sender_password)
-            smtp.send_message(msg)
-        print("Email sent successfully.")
-    except Exception as e:
-        print(f"Error sending email: {e}")
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+        smtp.login(sender_email, sender_password)
+        smtp.send_message(msg)
 
 if __name__ == "__main__":
-    # 1. Check if it is the correct time in New York
     verify_execution_time()
-    
-    # 2. If we pass the bouncer, run the heavy math
-    print("Correct execution window confirmed. Running Quad Risk K2 calculations...")
     try:
         report = calculate_quad_risk()
-        print(report)
         send_email(report)
     except Exception as e:
         print(f"Script failed: {e}")
