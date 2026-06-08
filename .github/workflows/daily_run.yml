@@ -5,7 +5,7 @@ on:
     # "Double-Tap" Execution: Runs at 19:45 UTC and 20:45 UTC 
     # to catch exactly 3:45 PM Eastern time, regardless of Daylight Saving Time.
     # Runs Monday (1) through Friday (5).
-    - cron: '45 19,20 * * 1-5'
+    - cron: '45 19 * * 1-5'
     
   # Allows you to manually trigger the workflow from the GitHub Actions tab for testing
   workflow_dispatch: 
