@@ -49,7 +49,7 @@ def sma_gate(prices: pd.Series, period: int, threshold: float) -> pd.Series:
 def verify_execution_time():
     """Acts as a bouncer to handle Daylight Saving Time offsets."""
     ny_time = datetime.now(ZoneInfo("America/New_York"))
-    if ny_time.hour != 15:
+    if ny_time.hour not in [15, 16]:
         print(f"Stand down: It is currently {ny_time.strftime('%I:%M %p')} in NY.")
         print("Waiting for the 3:45 PM execution window. Exiting gracefully.")
         sys.exit(0)
