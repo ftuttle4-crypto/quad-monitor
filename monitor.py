@@ -47,11 +47,13 @@ def sma_gate(prices: pd.Series, period: int, threshold: float) -> pd.Series:
 # --- Execution Logic ---
 
 def verify_execution_time():
-    """Acts as a bouncer to handle Daylight Saving Time offsets."""
+    """Acts as a bouncer to handle Daylight Saving Time offsets and massive GitHub cron delays."""
     ny_time = datetime.now(ZoneInfo("America/New_York"))
-    if ny_time.hour not in [15, 16]:
+    
+    # Allow the script to run anywhere from 3 PM to 6 PM NY time
+    if ny_time.hour not in [15, 16, 17, 18]:
         print(f"Stand down: It is currently {ny_time.strftime('%I:%M %p')} in NY.")
-        print("Waiting for the 3:45 PM execution window. Exiting gracefully.")
+        print("Waiting for the standard afternoon execution window. Exiting gracefully.")
         sys.exit(0)
 
 def calculate_quad_risk():
