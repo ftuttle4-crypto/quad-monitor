@@ -135,7 +135,7 @@ def send_email(body):
 
 if __name__ == "__main__":
     # --- TEMPORARILY COMMENTED OUT FOR LIVE TESTING TONIGHT ---
-    #verify_execution_time()
+    verify_execution_time()
     
     try:
         report = calculate_quad_risk()
