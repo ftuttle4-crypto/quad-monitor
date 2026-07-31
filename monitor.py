@@ -8,7 +8,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
-# --- The Author's Exact Gate Functions ---
+# --- The Author's Exact Gate Functions ----
 
 def _band_gate(prices: pd.Series, ref: pd.Series, threshold: float) -> pd.Series:
     if threshold <= 0:
